@@ -267,3 +267,109 @@ The above example would be written:
     print(resolver.lookup("https://json-schema.org/draft/2020-12/schema"))
 
 It is otherwise functionally equivalent to the above, other than that retrieval will not repeatedly make a web request.
+
+
+Resolution Semantics and Complexity
+------------------------------------
+
+This section pins down some of the behavior that is otherwise only implied
+by the API, and which is relied upon by the (specification-agnostic)
+reference-resolution logic.
+It may be most useful to authors integrating a custom
+`referencing.Specification`.
+
+Crawling is lazy
+^^^^^^^^^^^^^^^^
+
+Resources added to a registry are marked as *uncrawled* rather than being
+inspected immediately.
+Subresources and anchors are only discovered the first time a lookup
+requires them (see `Registry.crawl`, `Registry.get_or_retrieve` and
+`Registry.anchor`).
+Pre-crawling a registry and looking references up on demand therefore
+converge to the same result; the difference is purely when the work
+happens.
+A direct lookup of a resource that is already present in the registry does
+not trigger a crawl at all, and crawling is always attempted *before* a
+configured retrieval callable is consulted.
+
+Crawling visits each not-yet-crawled resource once.
+A single crawl is linear in the number of discovered (resource, anchor)
+pairs, i.e. it is :math:`O(n)` in the size of the resource graph, and the
+immutable registries returned retain a marker so that repeated crawling is
+:math:`O(1)` when nothing new has been added.
+
+Relative IDs and base URIs
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When a subresource declares a relative identifier, it is resolved against
+the URI of its enclosing resource, in the same way relative references are
+resolved against a `referencing.Resolver`'s base URI.
+Dot segments (``.`` and ``..``) within the *relative* reference being
+looked up are normalized while joining it to the base URI.
+The base URI already stored on a resolver is otherwise retained verbatim;
+in particular an empty (``""``) or fragment-only (``#frag``) reference is
+resolved against the stored base URI without re-normalizing dot segments
+that it contains.
+
+Fragments
+^^^^^^^^^
+
+A reference whose fragment is empty (``http://example.com/schema#``) is
+equivalent to the same reference without the fragment and returns the whole
+resource.
+A fragment beginning with ``/`` is interpreted as a JSON Pointer; pointer
+segments are percent-decoded, so ``%20`` matches a key containing a space.
+Any other non-empty fragment is treated as a plain-name anchor, whose name
+is matched verbatim and is *not* percent-decoded; a name containing a ``/``
+is reported as an invalid anchor rather than being mistaken for a pointer.
+
+Dynamic anchors
+^^^^^^^^^^^^^^^
+
+Dynamic anchors (in specifications that define them) bind dynamically while
+walking the resolver's *dynamic scope* -- the chain of base URIs entered
+while descending through subresources, ordered nearest-first.
+Resolution starts from the dynamic anchor that was referenced, and rebinds
+to the outermost dynamic anchor of the same name found in the dynamic
+scope.
+Plain (non-dynamic) anchors encountered in the scope are skipped; if no
+matching outer dynamic anchor exists, the originally referenced dynamic
+anchor is used as a fallback.
+
+Opaque resources
+^^^^^^^^^^^^^^^^
+
+`Specification.OPAQUE` documents have no internal identifier, no
+subresources and no anchors, so crawling an opaque resource never adds
+anything beyond the resource itself.
+The same is true for any custom specification whose ``id_of``,
+``subresources_of`` or ``anchors_in`` return nothing for some document:
+such a document forms an opaque boundary in the reference graph.
+
+Combining registries
+^^^^^^^^^^^^^^^^^^^^
+
+`Registry.combine` merges the in-memory resources, discovered anchors,
+uncrawled markers and (at most one) retrieval callable of the given
+registries.
+For registries with disjoint URIs, combination is effectively commutative:
+combining in either order and then crawling produces the same registry.
+When the same real URI is present in more than one registry the later
+registry's resource (and its anchor) wins, and this is the only situation in
+which combination order produces an observable difference.
+
+Cyclic structures
+^^^^^^^^^^^^^^^^^
+
+Deserialized JSON documents are trees and cannot contain cycles.
+A cycle is nevertheless expressible via manually constructed contents or a
+custom ``subresources_of`` which yields an ancestor object, in which case
+crawling would otherwise never terminate.
+Such a structure raises
+`referencing.exceptions.CyclicResourceStructure` (a subclass of
+`referencing.exceptions.Unresolvable`), both when crawling explicitly and
+when a lookup triggers crawling.
+Sharing the same subresource object from multiple positions without an
+ancestor loop (a directed acyclic graph) is not a cycle and remains fully
+supported.

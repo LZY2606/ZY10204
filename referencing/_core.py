@@ -26,6 +26,8 @@ class _Unset(Enum):
 
 _UNSET = _Unset.SENTINEL
 
+_object_id = id
+
 
 class _MaybeInSubresource(Protocol[D]):
     def __call__(
@@ -488,17 +490,35 @@ class Registry(Mapping[URI, Resource[D]]):
         """
         resources = self._resources
         anchors = self._anchors
-        uncrawled = [(uri, resources[uri]) for uri in self._uncrawled]
+        uncrawled = [
+            (uri, resources[uri], frozenset()) for uri in self._uncrawled
+        ]
         while uncrawled:
-            uri, resource = uncrawled.pop()
+            uri, resource, ancestry = uncrawled.pop()
 
             id = resource.id()
             if id is not None:
                 uri = urljoin(uri, id)
                 resources = resources.insert(uri, resource)
+            contents = resource.contents
+            if isinstance(contents, (Mapping, list)):
+                marker = _object_id(contents)
+                # Deserialized documents are trees, but manually constructed
+                # contents (or custom subresource iterators) may repeat an
+                # ancestor object, forming a cycle which would never finish
+                # crawling. Shared, distinct roots remain supported, as each
+                # traversal carries its own ancestry.
+                if marker in ancestry:
+                    raise exceptions.CyclicResourceStructure(
+                        ref=uri,
+                        resource=resource,
+                    )
+                ancestry = ancestry | {marker}
             for each in resource.anchors():
                 anchors = anchors.insert((uri, each.name), each)
-            uncrawled.extend((uri, each) for each in resource.subresources())
+            uncrawled.extend(
+                (uri, each, ancestry) for each in resource.subresources()
+            )
         return evolve(
             self,
             resources=resources,

@@ -163,3 +163,27 @@ class InvalidAnchor(Unresolvable):
             f"to use '#/{self.anchor}', as the slash is required *before each "
             "segment* of a JSON pointer."
         )
+
+
+@frozen
+class CyclicResourceStructure(Unresolvable):
+    """
+    Crawling led back to a resource which was already being crawled.
+
+    Subresources form a hierarchy, so a subresource is not allowed to be
+    (contained within) itself.
+    Such a cycle can only arise from a manually constructed (non-tree)
+    document -- deserialized JSON documents are always trees -- or from a
+    `~collections.abc.Mapping` or list of subresources which repeats an
+    already-crawled object.
+
+    Without detecting this case, crawling would never terminate.
+    """
+
+    resource: Resource[Any]
+
+    def __str__(self) -> str:
+        return (
+            f"{self.resource.contents!r} contains a cyclic subresource "
+            "structure, with a subresource containing itself"
+        )

@@ -2,6 +2,18 @@
 Changelog
 =========
 
+v0.37.1
+-------
+
+* Detect cyclic subresource structures while crawling, raising a new
+  ``referencing.exceptions.CyclicResourceStructure`` rather than looping
+  forever.
+  Cycles cannot occur in deserialized JSON (which is always a tree), but
+  could previously be introduced via manually constructed contents or a
+  custom ``Specification.subresources_of`` which repeats an ancestor object.
+  Acyclic sharing of the same subresource object from multiple positions
+  (a DAG) continues to be supported.
+
 v0.37.0
 -------
 

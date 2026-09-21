@@ -23,9 +23,11 @@ if "REFERENCING_SUITE" in os.environ:  # pragma: no cover
     SUITE = Path(os.environ["REFERENCING_SUITE"]) / "tests"
 else:
     SUITE = Path(__file__).parent.parent.parent / "suite/tests"
-if not SUITE.is_dir():  # pragma: no cover
-    raise SuiteNotFound()
-DIALECT_IDS = json.loads(SUITE.joinpath("specifications.json").read_text())
+SUITE_AVAILABLE = SUITE.is_dir()
+if SUITE_AVAILABLE:  # pragma: no cover
+    DIALECT_IDS = json.loads(SUITE.joinpath("specifications.json").read_text())
+else:
+    DIALECT_IDS = {}
 
 
 @pytest.mark.parametrize(
@@ -36,6 +38,8 @@ DIALECT_IDS = json.loads(SUITE.joinpath("specifications.json").read_text())
     ],
 )
 def test_referencing_suite(test_path, subtests):
+    if not SUITE_AVAILABLE:  # pragma: no cover
+        pytest.skip(str(SuiteNotFound()))
     dialect_id = DIALECT_IDS[test_path.relative_to(SUITE).parts[0]]
     specification = referencing.jsonschema.specification_with(dialect_id)
     loaded = json.loads(test_path.read_text())
