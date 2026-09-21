@@ -158,8 +158,42 @@ class InvalidAnchor(Unresolvable):
 
     def __str__(self) -> str:
         return (
-            f"'#{self.anchor}' is not a valid anchor, neither as a "
-            "plain name anchor nor as a JSON Pointer. You may have intended "
-            f"to use '#/{self.anchor}', as the slash is required *before each "
-            "segment* of a JSON pointer."
+        f"'#{self.anchor}' is not a valid anchor, neither as a "
+        "plain name anchor nor as a JSON Pointer. You may have intended "
+        f"to use '#/{self.anchor}', as the slash is required *before each "
+        "segment* of a JSON pointer."
+    )
+
+
+@frozen
+class CircularResourceStructure(Exception):
+    """
+    A resource's subresources form a cycle.
+
+    Registries discover subresources by walking the resources added to them
+    via a specification's ``subresources_of`` rule. This walk terminates only
+    if the resulting structure is acyclic; if a resource is (transitively)
+    its own subresource, crawling would otherwise recurse forever.
+
+    The :attr:`uri` attribute is the canonical URI (relative to which the
+    cycle was detected) at which the already-active subresource was
+    re-encountered, and :attr:`resource` is that resource.
+    """
+
+    uri: URI
+    resource: Resource[Any]
+
+    def __eq__(self, other: object) -> bool:
+        if self.__class__ is not other.__class__:
+            return NotImplemented
+        return attrs.astuple(self) == attrs.astuple(other)
+
+    def __hash__(self) -> int:
+        return hash(attrs.astuple(self))
+
+    def __str__(self) -> str:
+        return (
+            f"A circular resource structure was encountered at {self.uri!r} "
+            f"while crawling {self.resource.contents!r}. Resources which are "
+            "their own subresources cannot be crawled."
         )

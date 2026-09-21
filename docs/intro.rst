@@ -205,6 +205,56 @@ If you have more than one resource to add, you can use `Registry.with_resources`
 You may also want to have a look at `Registry.with_contents` for a further method to add resources to a registry without constructing a `Resource` object yourself.
 
 
+Crawling, Subresources and Equivalent Registries
+------------------------------------------------
+
+When a resource is added to a `referencing.Registry`, it is initially marked as *uncrawled*.
+A registry finds subresources -- and the anchors they contain -- only when something is looked up that the registry doesn't yet know about (or explicitly when you call `Registry.crawl`).
+Both forms describe the same reference graph:
+
+.. testcode::
+
+    from referencing import Registry
+    from referencing.jsonschema import DRAFT202012
+
+    nested = DRAFT202012.create_resource(
+        {
+            "$id": "https://example.com/nested/",
+            "$defs": {"leaf": {"$id": "leaf", "const": 37}},
+        },
+    )
+
+    eager = (nested @ Registry()).crawl()      # walk immediately
+    lazy = nested @ Registry()                # walk on first demand
+
+    # On demand, the lazy registry discovers the same subresource.
+    assert eager.contents("https://example.com/nested/leaf") == (
+        lazy.resolver()
+        .lookup("https://example.com/nested/leaf")
+        .contents
+    )
+
+On-demand crawling is *incremental*: each lookup returns a new `referencing.Resolver` carrying a registry which has crawled only as far as was necessary.
+This is why the object returned by `referencing.Resolver.lookup` pairs the resolved contents with a resolver for future lookups; continuing to resolve from it reuses what was already discovered.
+
+Relative identifiers are resolved against the base URI of the containing resource as the walk descends, and an empty fragment is treated as equivalent to no fragment at all (``https://example.com/doc`` and ``https://example.com/doc#`` denote the same resource).
+
+.. note::
+
+    The internal structure being walked is defined by the active `referencing.Specification` via its ``id_of``, ``subresources_of`` and ``anchors_in`` rules.
+    An *opaque* resource (`Resource.opaque`) has no identifier, subresources or anchors: it is retrievable in full, but the registry never descends into it.
+
+Subresources may be shared between multiple parents (a diamond); such sharing is walked without complaint.
+A structure which instead contains a genuine cycle -- a resource that is (transitively) its own subresource -- cannot be crawled to completion, and raises a `referencing.exceptions.CircularResourceStructure` rather than looping indefinitely.
+
+Complexity
+^^^^^^^^^^
+
+Crawling visits each distinct reachable resource once per distinct resolved URI at which it is encountered, and performs a constant number of hash-map operations per discovered subresource and anchor.
+Shared subresources can therefore be visited via more than one parent, but a cyclic graph always raises rather than traversing forever.
+An uncrawled registry does no work beyond inserting the resources you give it; lookups only crawl what they need, and a resource returned by a ``retrieve`` callable is inserted into the returned registry so it is not retrieved again from the same registry.
+
+
 Dynamically Retrieving Resources
 --------------------------------
 

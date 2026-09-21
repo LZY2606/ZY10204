@@ -2,6 +2,12 @@
 Changelog
 =========
 
+vNext
+-----
+
+* Crawling a `referencing.Registry` whose resources form a genuine cycle (a resource which is transitively its own subresource) now raises `referencing.exceptions.CircularResourceStructure` instead of looping indefinitely.
+  Shared (diamond-shaped) subresources continue to be walked as before.
+
 v0.37.0
 -------
 

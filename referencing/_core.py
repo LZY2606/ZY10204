@@ -488,17 +488,62 @@ class Registry(Mapping[URI, Resource[D]]):
         """
         resources = self._resources
         anchors = self._anchors
-        uncrawled = [(uri, resources[uri]) for uri in self._uncrawled]
-        while uncrawled:
-            uri, resource = uncrawled.pop()
+        # An explicit-stack depth-first traversal, mirroring a recursive
+        # descent into each resource's subresources. We track which
+        # (resolved-URI, contents) pairs are active on the current ancestor
+        # chain so that genuinely cyclic structures raise a clear error
+        # rather than looping indefinitely, while subresources shared (but not
+        # cyclic) between multiple parents are simply walked more than once.
+        done: set[tuple[URI, int]] = set()
+        active: set[tuple[URI, int]] = set()
+        stack: list[tuple[URI, Resource[D], Iterator[Resource[D]]]] = []
 
-            id = resource.id()
-            if id is not None:
-                uri = urljoin(uri, id)
-                resources = resources.insert(uri, resource)
-            for each in resource.anchors():
-                anchors = anchors.insert((uri, each.name), each)
-            uncrawled.extend((uri, each) for each in resource.subresources())
+        for root_uri in self._uncrawled:
+            root = resources[root_uri]
+            root_id = root.id()
+            if root_id is not None:
+                root_uri = urljoin(root_uri, root_id)
+                resources = resources.insert(root_uri, root)
+
+            key = (root_uri, id(root.contents))
+            if key in done:
+                continue
+            active.add(key)
+            for each in root.anchors():
+                anchors = anchors.insert((root_uri, each.name), each)
+            stack.append((root_uri, root, iter(root.subresources())))
+            while stack:
+                uri, resource, subresources = stack[-1]
+                subresource = next(subresources, None)
+                if subresource is None:
+                    stack.pop()
+                    active.discard((uri, id(resource.contents)))
+                    done.add((uri, id(resource.contents)))
+                    continue
+
+                sub_id = subresource.id()
+                sub_uri = uri
+                if sub_id is not None:
+                    sub_uri = urljoin(uri, sub_id)
+                    resources = resources.insert(sub_uri, subresource)
+
+                sub_key = (sub_uri, id(subresource.contents))
+                if sub_key in active:
+                    raise exceptions.CircularResourceStructure(
+                        uri=sub_uri,
+                        resource=subresource,
+                    )
+                if sub_key not in done:
+                    active.add(sub_key)
+                    for each in subresource.anchors():
+                        anchors = anchors.insert((sub_uri, each.name), each)
+                    stack.append(
+                        (
+                            sub_uri,
+                            subresource,
+                            iter(subresource.subresources()),
+                        ),
+                    )
         return evolve(
             self,
             resources=resources,
